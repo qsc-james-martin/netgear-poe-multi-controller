@@ -1,0 +1,847 @@
+-- Netgear PoE Multi Controller
+-- Q-SYS plugin that groups several Netgear switch plugin instances into one panel.
+--  * Select switches and turn their PoE (or ports) on/off
+--  * Press-and-hold All On / All Off with a configurable switch scope ("1-4", "1-3, 5", "all except 2" ...)
+--  * Global default and per-switch port lists (include or exclude ports)
+--  * Combined status, ports on / powered, optional PoE draw totals
+--
+-- Requirements: each Netgear plugin needs Script Access enabled and Write Access = Yes
+-- (otherwise EnablePoE N / EnablePort N controls are not exposed).
+-- Netgear components are found by plugin GUID 5ba63a53-4459-4be4-938f-f3a40c055026.
+
+PluginInfo = {
+  Name = "Netgear~PoE Multi Controller",
+  Version = "1.0.0",
+  Id = "4b5adc71-6fb7-476a-b423-aed8d5b20d75",
+  Author = "James Martin",
+  Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status.",
+  ShowDebug = true
+}
+
+function GetColor(props)
+  return { 120, 60, 160 }
+end
+
+function GetPrettyName(props)
+  return "Netgear PoE Multi Controller  v" .. PluginInfo.Version
+end
+
+--------------------------------------------------------------------
+-- Properties
+--------------------------------------------------------------------
+function GetProperties()
+  local props = {}
+  table.insert(props, {
+    Name = "Switch Count",
+    Type = "integer",
+    Min = 1,
+    Max = 32,
+    Value = 4
+  })
+  table.insert(props, {
+    Name = "Control",
+    Type = "enum",
+    Choices = { "PoE", "Port" },
+    Value = "PoE"
+  })
+  table.insert(props, {
+    Name = "Metering",
+    Type = "enum",
+    Choices = { "Off", "On" },
+    Value = "Off"
+  })
+  table.insert(props, {
+    Name = "Debug Print",
+    Type = "enum",
+    Choices = { "No", "Yes" },
+    Value = "No"
+  })
+  return props
+end
+
+function RectifyProperties(props)
+  return props
+end
+
+--------------------------------------------------------------------
+-- Controls
+--------------------------------------------------------------------
+function GetControls(props)
+  local n = props["Switch Count"].Value
+  local metering = props["Metering"].Value == "On"
+  local ctls = {}
+
+  local function add(t)
+    t.UserPin = true
+    t.PinStyle = t.PinStyle or "Both"
+    t.Count = t.Count or 1
+    table.insert(ctls, t)
+  end
+
+  -- Combined status / totals
+  add({ Name = "Status", ControlType = "Indicator", IndicatorType = "Status", PinStyle = "Output" })
+  add({ Name = "SwitchesOnline", ControlType = "Indicator", IndicatorType = "Text", PinStyle = "Output" })
+  add({ Name = "PortsOn", ControlType = "Indicator", IndicatorType = "Text", PinStyle = "Output" })
+  add({ Name = "PortsPowered", ControlType = "Indicator", IndicatorType = "Text", PinStyle = "Output" })
+  if metering then
+    add({ Name = "TotalDraw", ControlType = "Indicator", IndicatorType = "Text", PinStyle = "Output" })
+  end
+  add({ Name = "LastAction", ControlType = "Indicator", IndicatorType = "Text", PinStyle = "Output" })
+
+  -- Selection control
+  add({ Name = "Select", ControlType = "Button", ButtonType = "Toggle", Count = n })
+  add({ Name = "SelectAll", ControlType = "Button", ButtonType = "Trigger" })
+  add({ Name = "SelectNone", ControlType = "Button", ButtonType = "Trigger" })
+  add({ Name = "On", ControlType = "Button", ButtonType = "Trigger" })
+  add({ Name = "Off", ControlType = "Button", ButtonType = "Trigger" })
+
+  -- Hold-to-switch all
+  add({ Name = "AllOn", ControlType = "Button", ButtonType = "Momentary" })
+  add({ Name = "AllOff", ControlType = "Button", ButtonType = "Momentary" })
+  add({ Name = "HoldProgress", ControlType = "Indicator", IndicatorType = "Meter", Min = 0, Max = 1, PinStyle = "Output" })
+  add({ Name = "AllScopeResult", ControlType = "Indicator", IndicatorType = "Text", PinStyle = "Output" })
+
+  -- Per-switch feedback
+  add({ Name = "SwLed", ControlType = "Indicator", IndicatorType = "Led", Count = n, PinStyle = "Output" })
+  add({ Name = "SwState", ControlType = "Indicator", IndicatorType = "Text", Count = n, PinStyle = "Output" })
+  if metering then
+    add({ Name = "SwDraw", ControlType = "Indicator", IndicatorType = "Text", Count = n, PinStyle = "Output" })
+  end
+  add({ Name = "SwStatus", ControlType = "Indicator", IndicatorType = "Status", Count = n, PinStyle = "Output" })
+
+  -- Setup: per-switch
+  add({ Name = "ComponentName", ControlType = "Text", Count = n })
+  add({ Name = "SwName", ControlType = "Text", Count = n })
+  add({ Name = "OnPorts", ControlType = "Text", Count = n })
+  add({ Name = "OffPorts", ControlType = "Text", Count = n })
+  add({ Name = "Resolved", ControlType = "Indicator", IndicatorType = "Text", Count = n, PinStyle = "Output" })
+
+  -- Setup: global
+  add({ Name = "AllScope", ControlType = "Text", DefaultValue = "all" })
+  add({ Name = "DefaultOnPorts", ControlType = "Text", DefaultValue = "all" })
+  add({ Name = "DefaultOffPorts", ControlType = "Text", DefaultValue = "all" })
+  add({ Name = "HoldTime", ControlType = "Knob", ControlUnit = "Seconds", Min = 0, Max = 10, DefaultValue = 2 })
+  add({ Name = "Stagger", ControlType = "Knob", ControlUnit = "Seconds", Min = 0, Max = 5, DefaultValue = 0.5 })
+  add({ Name = "PollInterval", ControlType = "Knob", ControlUnit = "Seconds", Min = 1, Max = 60, DefaultValue = 3 })
+  add({ Name = "AutoClear", ControlType = "Button", ButtonType = "Toggle", DefaultValue = true })
+
+  return ctls
+end
+
+--------------------------------------------------------------------
+-- Layout
+--------------------------------------------------------------------
+local PageNames = { "Control", "Setup" }
+
+function GetPages(props)
+  local pages = {}
+  for _, name in ipairs(PageNames) do
+    table.insert(pages, { name = name })
+  end
+  return pages
+end
+
+function GetControlLayout(props)
+  local layout, graphics = {}, {}
+  local n = props["Switch Count"].Value
+  local metering = props["Metering"].Value == "On"
+  local portMode = props["Control"].Value == "Port"
+  local page = PageNames[props["page_index"].Value]
+  local W = 760
+
+  local function key(name, i)
+    if n > 1 then return name .. " " .. i end
+    return name
+  end
+
+  local function label(text, x, y, w, h, align, size)
+    table.insert(graphics, {
+      Type = "Text", Text = text, Position = { x, y }, Size = { w, h or 18 },
+      FontSize = size or 11, HTextAlign = align or "Right"
+    })
+  end
+
+  local function group(text, x, y, w, h)
+    table.insert(graphics, {
+      Type = "GroupBox", Text = text, Position = { x, y }, Size = { w, h },
+      HTextAlign = "Left", StrokeWidth = 1, CornerRadius = 6, Fill = { 242, 242, 242 }
+    })
+  end
+
+  local function text(name, x, y, w, h, readOnly)
+    layout[name] = {
+      Style = "Text", Position = { x, y }, Size = { w, h or 20 }, FontSize = 11,
+      HTextAlign = "Center", IsReadOnly = readOnly or false
+    }
+  end
+
+  local function button(name, legend, x, y, w, h, color)
+    layout[name] = {
+      Style = "Button", Legend = legend, Position = { x, y }, Size = { w, h or 24 },
+      FontSize = 11, CornerRadius = 4, Color = color
+    }
+  end
+
+  local what = portMode and "Ports" or "PoE"
+
+  if page == "Control" then
+    -- Combined
+    local y0 = 0
+    group("Combined", 0, y0, W, 100)
+    label("Status", 8, y0 + 22, 56, 20)
+    layout["Status"] = { Style = "Text", Position = { 70, y0 + 22 }, Size = { W - 78, 22 }, FontSize = 11 }
+
+    local cols = {
+      { "SwitchesOnline", "Switches Online", 120 },
+      { "PortsOn", what .. " On", 120 },
+      { "PortsPowered", "Ports Powered", 120 },
+    }
+    if metering then table.insert(cols, { "TotalDraw", "Total PoE Draw", 140 }) end
+    local x = 8
+    for _, c in ipairs(cols) do
+      label(c[2], x, y0 + 50, c[3], 16, "Center")
+      text(c[1], x, y0 + 68, c[3], 22, true)
+      x = x + c[3] + 4
+    end
+
+    -- Control
+    local y1 = y0 + 106
+    group("Control", 0, y1, W, 112)
+    button("SelectAll", "Select All", 8, y1 + 22, 90, 28)
+    button("SelectNone", "Clear", 102, y1 + 22, 90, 28)
+    button("On", what .. " On", 210, y1 + 22, 90, 28, { 0, 170, 60 })
+    button("Off", what .. " Off", 304, y1 + 22, 90, 28, { 210, 40, 40 })
+    label("Last action", 8, y1 + 58, 70, 20, "Left")
+    text("LastAction", 80, y1 + 58, 314, 20, true)
+
+    local hx = 420
+    button("AllOn", "Hold: All On", hx, y1 + 22, 160, 28, { 0, 170, 60 })
+    button("AllOff", "Hold: All Off", hx + 168, y1 + 22, 160, 28, { 210, 40, 40 })
+    layout["HoldProgress"] = {
+      Style = "Meter", MeterStyle = "Level", ShowTextbox = false, Position = { hx, y1 + 54 }, Size = { 328, 8 }
+    }
+    text("AllScopeResult", hx, y1 + 66, 328, 20, true)
+    label("Select switches then press On / Off.  Hold All On / All Off for the hold time (Setup page).",
+      8, y1 + 88, W - 16, 16, "Left", 10)
+
+    -- Switches
+    local y2 = y1 + 118
+    local rowH = 26
+    group("Switches", 0, y2, W, 50 + n * rowH)
+    local cx = { sel = 8, led = 144, state = 168, draw = 332, st = metering and 424 or 332 }
+    label("Select", cx.sel, y2 + 20, 130, 16, "Center")
+    label("State", cx.state, y2 + 20, 156, 16, "Center")
+    if metering then label("PoE Draw", cx.draw, y2 + 20, 84, 16, "Center") end
+    label("Switch Status", cx.st, y2 + 20, W - cx.st - 8, 16, "Center")
+    for i = 1, n do
+      local y = y2 + 40 + (i - 1) * rowH
+      button(key("Select", i), "Switch " .. i, cx.sel, y, 130, 22)
+      layout[key("SwLed", i)] = { Style = "Led", Position = { cx.led, y + 3 }, Size = { 16, 16 }, Color = { 0, 220, 0 } }
+      text(key("SwState", i), cx.state, y + 1, 156, 20, true)
+      if metering then text(key("SwDraw", i), cx.draw, y + 1, 84, 20, true) end
+      layout[key("SwStatus", i)] = { Style = "Text", Position = { cx.st, y + 1 }, Size = { W - cx.st - 8, 20 }, FontSize = 10 }
+    end
+
+  elseif page == "Setup" then
+    local rowH = 26
+    -- Switch assignment
+    local y0 = 0
+    local hAssign = 50 + n * rowH
+    group("Switch Assignment  (blank port fields use the defaults below)", 0, y0, W, hAssign)
+    local cx = { num = 8, comp = 36, name = 214, on = 342, off = 450, res = 558 }
+    label("Component", cx.comp, y0 + 20, 174, 16, "Center")
+    label("Display Name", cx.name, y0 + 20, 124, 16, "Center")
+    label("On Ports", cx.on, y0 + 20, 104, 16, "Center")
+    label("Off Ports", cx.off, y0 + 20, 104, 16, "Center")
+    label("Resolved", cx.res, y0 + 20, W - cx.res - 8, 16, "Center")
+    for i = 1, n do
+      local y = y0 + 40 + (i - 1) * rowH
+      label(tostring(i), cx.num, y + 1, 24, 20, "Center")
+      layout[key("ComponentName", i)] = { Style = "ComboBox", Position = { cx.comp, y }, Size = { 174, 22 }, FontSize = 11 }
+      text(key("SwName", i), cx.name, y + 1, 124, 20)
+      text(key("OnPorts", i), cx.on, y + 1, 104, 20)
+      text(key("OffPorts", i), cx.off, y + 1, 104, 20)
+      layout[key("Resolved", i)] = {
+        Style = "Text", Position = { cx.res, y + 1 }, Size = { W - cx.res - 8, 20 }, FontSize = 10,
+        HTextAlign = "Left", IsReadOnly = true
+      }
+    end
+
+    -- Global settings
+    local y1 = y0 + hAssign + 6
+    group("Global Settings", 0, y1, W, 214)
+    local lx, lw, vx = 8, 170, 184
+    local function row(r) return y1 + 22 + (r - 1) * 26 end
+    label("All On / All Off Switches", lx, row(1), lw, 20)
+    text("AllScope", vx, row(1), 200, 20)
+    label("e.g.  all  |  1-4  |  1-2, 4  |  all except 3  |  !3", vx + 208, row(1), 360, 20, "Left", 10)
+    label("Default On Ports", lx, row(2), lw, 20)
+    text("DefaultOnPorts", vx, row(2), 200, 20)
+    label("Default Off Ports", lx, row(3), lw, 20)
+    text("DefaultOffPorts", vx, row(3), 200, 20)
+    label("Ports: all  |  1-6  |  all except 1  |  !5, !7  |  none", vx + 208, row(2), 360, 20, "Left", 10)
+    label(portMode and "Per-switch fields override these. Core/trunk ports are never disabled."
+      or "Per-switch fields above override these.", vx + 208, row(3), 360, 20, "Left", 10)
+    label("Hold Time (s)", lx, row(4), lw, 20)
+    text("HoldTime", vx, row(4), 80, 20)
+    label("Switch Stagger (s)", lx, row(5), lw, 20)
+    text("Stagger", vx, row(5), 80, 20)
+    label("Poll Interval (s)", lx, row(6), lw, 20)
+    text("PollInterval", vx, row(6), 80, 20)
+    label("Clear Selection After On/Off", lx, row(7), lw, 20)
+    button("AutoClear", "", vx, row(7), 36, 20)
+  end
+
+  return layout, graphics
+end
+
+--------------------------------------------------------------------
+-- Runtime
+--------------------------------------------------------------------
+if Controls then
+  local N = Properties["Switch Count"].Value
+  local DEBUG = Properties["Debug Print"].Value == "Yes"
+  local METERING = Properties["Metering"].Value == "On"
+  local PORT_MODE = Properties["Control"].Value == "Port"
+  local CTL_PREFIX = PORT_MODE and "EnablePort" or "EnablePoE"
+  local WHAT = PORT_MODE and "ports" or "PoE"
+
+  local function log(...)
+    if DEBUG then print(...) end
+  end
+
+  -- Controls with Count = 1 are single objects, otherwise arrays
+  local function arr(c)
+    if c == nil then return {} end
+    if type(c) == "table" and c[1] ~= nil then return c end
+    return { c }
+  end
+
+  local C = {}
+  for _, name in ipairs({ "Select", "SwLed", "SwState", "SwDraw", "SwStatus",
+    "ComponentName", "SwName", "OnPorts", "OffPorts", "Resolved" }) do
+    C[name] = arr(Controls[name])
+  end
+
+  local function trim(s)
+    return ((s or ""):match("^%s*(.-)%s*$"))
+  end
+
+  ------------------------------------------------------------------
+  -- Range parsing: "all", "1-9", "1-4, 6-9", "one to nine", "all except 5", "!10", "none"
+  ------------------------------------------------------------------
+  local NumberWords = {
+    one = 1, two = 2, three = 3, four = 4, five = 5, six = 6, seven = 7, eight = 8, nine = 9, ten = 10,
+    eleven = 11, twelve = 12, thirteen = 13, fourteen = 14, fifteen = 15, sixteen = 16,
+    seventeen = 17, eighteen = 18, nineteen = 19, twenty = 20
+  }
+  local ExcludeWords = { except = true, ["not"] = true, exclude = true, excluding = true, but = true, without = true }
+
+  -- Returns sorted list of numbers in 1..max, and a list of unrecognised tokens.
+  local function parseSet(textIn, max)
+    local s = trim(textIn):lower()
+    if s == "none" then return {}, {} end
+    s = s:gsub("%a+", function(w) return NumberWords[w] and tostring(NumberWords[w]) or w end)
+    s = s:gsub("%s+to%s+", "-"):gsub("%s*%.%.%s*", "-"):gsub("%s*%-%s*", "-")
+    s = s:gsub("%f[%a]and%f[%A]", ",")
+
+    local inc, exc, bad = {}, {}, {}
+    local anyInc, excludeMode = false, false
+    for rawTok in s:gmatch("[^,;%s]+") do
+      local tok = rawTok
+      if ExcludeWords[tok] then
+        excludeMode = true
+      else
+        local neg = false
+        if tok:sub(1, 1) == "!" then
+          neg = true
+          tok = tok:sub(2)
+        end
+        local target = (neg or excludeMode) and exc or inc
+        if tok == "all" or tok == "*" then
+          for i = 1, max do inc[i] = true end
+          anyInc = true
+        else
+          local a, b = tok:match("^(%d+)%-(%d+)$")
+          if not a then
+            a = tok:match("^(%d+)$")
+            b = a
+          end
+          if a then
+            a, b = tonumber(a), tonumber(b)
+            if a > b then a, b = b, a end
+            for i = a, math.min(b, max) do target[i] = true end
+            if target == inc then anyInc = true end
+          elseif tok ~= "" then
+            table.insert(bad, rawTok)
+          end
+        end
+      end
+    end
+    if not anyInc then
+      for i = 1, max do inc[i] = true end
+    end
+    local list = {}
+    for i = 1, max do
+      if inc[i] and not exc[i] then table.insert(list, i) end
+    end
+    return list, bad
+  end
+
+  -- {1,2,3,5,7,8} -> "1-3, 5, 7-8"
+  local function compact(list)
+    local parts, i = {}, 1
+    while i <= #list do
+      local j = i
+      while j < #list and list[j + 1] == list[j] + 1 do j = j + 1 end
+      if j > i then
+        table.insert(parts, list[i] .. "-" .. list[j])
+      else
+        table.insert(parts, tostring(list[i]))
+      end
+      i = j + 1
+    end
+    if #parts == 0 then return "none" end
+    return table.concat(parts, ", ")
+  end
+
+  ------------------------------------------------------------------
+  -- Switch binding
+  ------------------------------------------------------------------
+  -- Netgear plugin. Component Type looks like
+  -- %PLUGIN%_5ba63a53-4459-4be4-938f-f3a40c055026_%FP%_<hash>; the hash changes per version.
+  local NetgearPluginId = "5ba63a53-4459-4be4-938f-f3a40c055026"
+
+  local PortCtls = {
+    [CTL_PREFIX] = "enable", ConnectedPowered = "powered", Trunk = "trunk", PoEDraw = "draw",
+  }
+  local SingleCtls = { Status = "status", Disable = "disable", CorePort = "core" }
+
+  local sws = {}
+
+  local function displayName(i)
+    local nm = trim(C.SwName[i] and C.SwName[i].String)
+    if nm == "" then return "Switch " .. i end
+    return nm
+  end
+
+  local function readCtl(s, cname)
+    if not cname then return nil end
+    local ok, ctl = pcall(function() return s.comp[cname] end)
+    if ok then return ctl end
+  end
+
+  local function bind(i)
+    local s = { index = i, ports = {}, portNums = {}, online = false, ctl = {} }
+    sws[i] = s
+    s.name = trim(C.ComponentName[i].String)
+    if s.name == "" then
+      s.reason = "Not assigned"
+      s.unassigned = true
+      return s
+    end
+    local ok, ctls = pcall(Component.GetControls, s.name)
+    if not ok or type(ctls) ~= "table" or #ctls == 0 then
+      s.reason = "Component '" .. s.name .. "' not found (check name / Script Access)"
+      return s
+    end
+    s.comp = Component.New(s.name)
+
+    for _, c in ipairs(ctls) do
+      local cname = c.Name or ""
+      local kind, num = cname:match("^(%a+)%s+(%d+)$")
+      if kind and PortCtls[kind] then
+        num = tonumber(num)
+        s.ports[num] = s.ports[num] or {}
+        s.ports[num][PortCtls[kind]] = cname
+      elseif SingleCtls[cname] then
+        s.ctl[SingleCtls[cname]] = cname
+      end
+    end
+
+    for num, p in pairs(s.ports) do
+      if p.enable then table.insert(s.portNums, num) end
+    end
+    table.sort(s.portNums)
+    s.maxPort = s.portNums[#s.portNums] or 0
+    s.online = #s.portNums > 0
+    if not s.online then
+      s.reason = ("No %s controls - set Write Access to Yes on '%s'"):format(CTL_PREFIX, s.name)
+    end
+    log(("Bound switch %d '%s': %d %s ports"):format(i, s.name, #s.portNums, CTL_PREFIX))
+    return s
+  end
+
+  local function bindAll()
+    for i = 1, N do bind(i) end
+  end
+
+  -- Ports that must never be turned off in Port mode (uplink to Q-SYS core, trunks)
+  local function protectedPorts(s)
+    local prot = {}
+    if not PORT_MODE then return prot end
+    local core = tonumber((readCtl(s, s.ctl.core) or {}).String or "")
+    if core then prot[core] = true end
+    for _, n in ipairs(s.portNums) do
+      local t = readCtl(s, s.ports[n].trunk)
+      if t and t.Boolean then prot[n] = true end
+    end
+    return prot
+  end
+
+  -- Port list for a switch: "on" or "off"
+  local function portList(i, which)
+    local s = sws[i]
+    if not s or not s.online then return {}, {}, {} end
+    local own = which == "on" and C.OnPorts[i] or C.OffPorts[i]
+    local textIn = trim(own and own.String)
+    if textIn == "" then
+      textIn = which == "on" and Controls.DefaultOnPorts.String or Controls.DefaultOffPorts.String
+    end
+    local list, bad = parseSet(textIn, s.maxPort)
+    local prot = which == "off" and protectedPorts(s) or {}
+    local out, skipped = {}, {}
+    for _, n in ipairs(list) do
+      if s.ports[n] and s.ports[n].enable then
+        if prot[n] then table.insert(skipped, n) else table.insert(out, n) end
+      end
+    end
+    return out, bad, skipped
+  end
+
+  local function updateResolved(i)
+    local s = sws[i]
+    local r = C.Resolved[i]
+    if not r then return end
+    if not s or not s.online then
+      r.String = s and s.reason or ""
+      return
+    end
+    local onL, badOn = portList(i, "on")
+    local offL, badOff, skipped = portList(i, "off")
+    local str = ("%d ports | On: %s | Off: %s"):format(#s.portNums, compact(onL), compact(offL))
+    if #skipped > 0 then str = str .. " | protected: " .. compact(skipped) end
+    if #badOn + #badOff > 0 then
+      local bad = {}
+      for _, b in ipairs(badOn) do table.insert(bad, b) end
+      for _, b in ipairs(badOff) do table.insert(bad, b) end
+      str = str .. " | ignored: " .. table.concat(bad, " ")
+    end
+    r.String = str
+  end
+
+  local function updateAllResolved()
+    for i = 1, N do updateResolved(i) end
+  end
+
+  local function allScope()
+    local list, bad = parseSet(Controls.AllScope.String, N)
+    local s = "All On/Off switches: " .. compact(list)
+    if #bad > 0 then s = s .. "  (ignored: " .. table.concat(bad, " ") .. ")" end
+    Controls.AllScopeResult.String = s
+    return list
+  end
+
+  ------------------------------------------------------------------
+  -- Status polling
+  ------------------------------------------------------------------
+  local function fmtW(v)
+    if v == nil then return "--" end
+    if math.abs(v) >= 100 then return ("%.0f W"):format(v) end
+    return ("%.1f W"):format(v)
+  end
+
+  local function update()
+    local totDraw
+    local onlineCount, assignedCount = 0, 0
+    local portsOn, portsTotal, powered = 0, 0, 0
+    local issues, healthy = {}, 0
+
+    for i = 1, N do
+      local s = sws[i]
+      if s and not s.online and not s.unassigned then s = bind(i) end
+      local st = C.SwStatus[i]
+
+      if not s or not s.online then
+        C.SwLed[i].Boolean = false
+        C.SwState[i].String = s and s.unassigned and "" or "Offline"
+        if METERING then C.SwDraw[i].String = "" end
+        if s and s.unassigned then
+          st.Value = 3
+          st.String = "Not assigned"
+        else
+          assignedCount = assignedCount + 1
+          st.Value = 2
+          st.String = s and s.reason or "Missing"
+          table.insert(issues, displayName(i) .. ": " .. (s and s.reason or "missing"))
+        end
+      else
+        assignedCount = assignedCount + 1
+        onlineCount = onlineCount + 1
+
+        local onSet, offSet = {}, {}
+        for _, n in ipairs(portList(i, "on")) do onSet[n] = true end
+        for _, n in ipairs(portList(i, "off")) do offSet[n] = true end
+        local allOn, allOff, anyOnSet, anyOffSet = true, true, false, false
+        local count, pw, draw = 0, 0, nil
+        for _, n in ipairs(s.portNums) do
+          local p = s.ports[n]
+          local ctl = readCtl(s, p.enable)
+          local isOn = ctl and ctl.Boolean or false
+          if isOn then count = count + 1 end
+          if onSet[n] then anyOnSet = true; if not isOn then allOn = false end end
+          if offSet[n] then anyOffSet = true; if isOn then allOff = false end end
+          local pc = readCtl(s, p.powered)
+          if pc and pc.Boolean then pw = pw + 1 end
+          if METERING then
+            local d = readCtl(s, p.draw)
+            local v = d and tonumber(d.Value)
+            if v then draw = (draw or 0) + v end
+          end
+        end
+        local total = #s.portNums
+        portsOn, portsTotal, powered = portsOn + count, portsTotal + total, powered + pw
+
+        local stateText
+        if allOn and anyOnSet and count > 0 then stateText = "On"
+        elseif allOff and anyOffSet then stateText = "Off"
+        else stateText = "Partial" end
+        C.SwState[i].String = ("%s (%d/%d)  %d powered"):format(stateText, count, total, pw)
+        C.SwLed[i].Boolean = count > 0 and not (allOff and anyOffSet)
+
+        if METERING then
+          C.SwDraw[i].String = fmtW(draw)
+          if draw then totDraw = (totDraw or 0) + draw end
+        end
+
+        local code, msg = 0, "OK"
+        local sc = readCtl(s, s.ctl.status)
+        if sc then
+          code = tonumber(sc.Value) or 0
+          msg = sc.String ~= "" and sc.String or msg
+        end
+        local dis = readCtl(s, s.ctl.disable)
+        if dis and dis.Boolean then
+          code, msg = 3, "Disabled"
+        end
+        st.Value = code
+        st.String = msg
+        if code == 0 then
+          healthy = healthy + 1
+        else
+          table.insert(issues, displayName(i) .. ": " .. msg)
+        end
+      end
+    end
+
+    Controls.SwitchesOnline.String = ("%d / %d"):format(onlineCount, assignedCount)
+    Controls.PortsOn.String = ("%d / %d"):format(portsOn, portsTotal)
+    Controls.PortsPowered.String = tostring(powered)
+    if METERING then Controls.TotalDraw.String = fmtW(totDraw) end
+
+    if assignedCount == 0 then
+      Controls.Status.Value = 3
+      Controls.Status.String = "No switches assigned (see Setup page)"
+    else
+      local code
+      if #issues == 0 then code = 0
+      elseif healthy > 0 then code = 1
+      else code = 2 end
+      Controls.Status.Value = code
+      if code == 0 then
+        Controls.Status.String = ("All %d switches OK"):format(healthy)
+      else
+        Controls.Status.String = ("%d/%d OK - %s"):format(healthy, assignedCount, table.concat(issues, "; "))
+      end
+    end
+  end
+
+  ------------------------------------------------------------------
+  -- Switching
+  ------------------------------------------------------------------
+  local function switchOne(i, on)
+    local s = sws[i]
+    if not s or not s.online then return 0 end
+    local list = portList(i, on and "on" or "off")
+    for _, n in ipairs(list) do
+      local ctl = readCtl(s, s.ports[n].enable)
+      if ctl then ctl.Boolean = on end
+    end
+    log(("%s %s %s ports %s"):format(displayName(i), WHAT, on and "on" or "off", compact(list)))
+    return #list
+  end
+
+  local refreshTimer = Timer.New()
+  refreshTimer.EventHandler = function()
+    refreshTimer:Stop()
+    update()
+  end
+
+  local function run(indices, on, source)
+    local stagger = math.max(Controls.Stagger.Value, 0)
+    local names, delay = {}, 0
+    for _, i in ipairs(indices) do
+      local s = sws[i]
+      if s and s.online then
+        table.insert(names, displayName(i))
+        if delay <= 0 then
+          switchOne(i, on)
+        else
+          Timer.CallAfter(function() switchOne(i, on) end, delay)
+        end
+        delay = delay + stagger
+        C.SwState[i].String = on and "Switching on..." or "Switching off..."
+      end
+    end
+    local summary = #names > 0 and table.concat(names, ", ") or "no online switches"
+    Controls.LastAction.String = ("%s %s %s: %s"):format(source, WHAT, on and "ON" or "OFF", summary)
+    refreshTimer:Stop()
+    refreshTimer:Start(delay + 1.5)
+  end
+
+  local function selectedIndices()
+    local list = {}
+    for i = 1, N do
+      if C.Select[i].Boolean then table.insert(list, i) end
+    end
+    return list
+  end
+
+  local function clearSelection()
+    for i = 1, N do C.Select[i].Boolean = false end
+  end
+
+  local function runSelected(on)
+    local list = selectedIndices()
+    if #list == 0 then
+      Controls.LastAction.String = "Nothing selected"
+      return
+    end
+    run(list, on, "Selected")
+    if Controls.AutoClear.Boolean then clearSelection() end
+  end
+
+  Controls.On.EventHandler = function() runSelected(true) end
+  Controls.Off.EventHandler = function() runSelected(false) end
+  Controls.SelectAll.EventHandler = function()
+    for i = 1, N do C.Select[i].Boolean = sws[i] ~= nil and sws[i].online end
+  end
+  Controls.SelectNone.EventHandler = clearSelection
+
+  ------------------------------------------------------------------
+  -- Press and hold All On / All Off
+  ------------------------------------------------------------------
+  local hold = { timer = Timer.New(), which = nil, start = 0, fired = false }
+
+  local function stopHold()
+    hold.timer:Stop()
+    hold.which = nil
+    Controls.HoldProgress.Position = 0
+  end
+
+  hold.timer.EventHandler = function()
+    if not hold.which then return stopHold() end
+    local ht = math.max(Controls.HoldTime.Value, 0)
+    local elapsed = Timer.Now() - hold.start
+    Controls.HoldProgress.Position = ht > 0 and math.min(elapsed / ht, 1) or 1
+    if not hold.fired and elapsed >= ht then
+      hold.fired = true
+      run(allScope(), hold.which == "on", "All")
+    end
+  end
+
+  local function holdHandler(which)
+    return function(ctl)
+      if ctl.Boolean then
+        hold.which = which
+        hold.start = Timer.Now()
+        hold.fired = false
+        Controls.HoldProgress.Position = 0
+        hold.timer:Start(0.05)
+      elseif hold.which == which then
+        stopHold()
+      end
+    end
+  end
+
+  Controls.AllOn.EventHandler = holdHandler("on")
+  Controls.AllOff.EventHandler = holdHandler("off")
+
+  ------------------------------------------------------------------
+  -- Setup handlers
+  ------------------------------------------------------------------
+  local function findSwitchComponents()
+    local names = {}
+    local ok, comps = pcall(Component.GetComponents)
+    if not ok or type(comps) ~= "table" then return names end
+    for _, c in ipairs(comps) do
+      if tostring(c.Type or ""):find(NetgearPluginId, 1, true) then
+        table.insert(names, c.Name)
+      end
+    end
+    table.sort(names)
+    return names
+  end
+
+  local function refreshChoices()
+    local names = findSwitchComponents()
+    local choices = { "" }
+    for _, n in ipairs(names) do table.insert(choices, n) end
+    for i = 1, N do C.ComponentName[i].Choices = choices end
+    log(("Found %d Netgear switch components"):format(#names))
+  end
+
+  local function refreshLegend(i)
+    C.Select[i].Legend = displayName(i)
+  end
+
+  local poll = Timer.New()
+  poll.EventHandler = function()
+    update()
+    if PORT_MODE then updateAllResolved() end -- core/trunk flags arrive after connect
+  end
+
+  local function startPoll()
+    poll:Stop()
+    poll:Start(math.max(Controls.PollInterval.Value, 1))
+  end
+
+  local function rebindAll()
+    bindAll()
+    updateAllResolved()
+    for i = 1, N do refreshLegend(i) end
+    update()
+  end
+
+  for i = 1, N do
+    C.ComponentName[i].EventHandler = function()
+      bind(i)
+      updateResolved(i)
+      update()
+    end
+    C.SwName[i].EventHandler = function()
+      refreshLegend(i)
+    end
+    C.OnPorts[i].EventHandler = function()
+      updateResolved(i)
+      update()
+    end
+    C.OffPorts[i].EventHandler = C.OnPorts[i].EventHandler
+  end
+
+  Controls.DefaultOnPorts.EventHandler = function()
+    updateAllResolved()
+    update()
+  end
+  Controls.DefaultOffPorts.EventHandler = Controls.DefaultOnPorts.EventHandler
+  Controls.AllScope.EventHandler = function() allScope() end
+  Controls.PollInterval.EventHandler = startPoll
+
+  ------------------------------------------------------------------
+  -- Init
+  ------------------------------------------------------------------
+  refreshChoices()
+  rebindAll()
+  allScope()
+  startPoll()
+end
