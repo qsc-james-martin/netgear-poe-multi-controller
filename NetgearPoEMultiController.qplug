@@ -11,7 +11,7 @@
 
 PluginInfo = {
   Name = "Netgear~PoE Multi Controller",
-  Version = "1.0.1",
+  Version = "1.0.4",
   Id = "4b5adc71-6fb7-476a-b423-aed8d5b20d75",
   Author = "James Martin",
   Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status.",
@@ -156,7 +156,7 @@ function GetControlLayout(props)
 
   local function label(text, x, y, w, h, align, size)
     table.insert(graphics, {
-      Type = "Text", Text = text, Position = { x, y }, Size = { w, h or 18 },
+      Type = "Text", Text = text, Position = { x, y }, Size = { w, h or 16 },
       FontSize = size or 11, HTextAlign = align or "Right"
     })
   end
@@ -170,15 +170,15 @@ function GetControlLayout(props)
 
   local function text(name, x, y, w, h, readOnly)
     layout[name] = {
-      Style = "Text", Position = { x, y }, Size = { w, h or 20 }, FontSize = 11,
+      Style = "Text", Position = { x, y }, Size = { w, h or 16 }, FontSize = 11,
       HTextAlign = "Center", IsReadOnly = readOnly or false
     }
   end
 
   local function button(name, legend, x, y, w, h, color)
     layout[name] = {
-      Style = "Button", Legend = legend, Position = { x, y }, Size = { w, h or 24 },
-      FontSize = 11, CornerRadius = 4, Color = color
+      Style = "Button", Legend = legend, Position = { x, y }, Size = { w, h or 16 },
+      FontSize = 9, CornerRadius = 4, Color = color
     }
   end
 
@@ -188,8 +188,8 @@ function GetControlLayout(props)
     -- Combined
     local y0 = 0
     group("Combined", 0, y0, W, 100)
-    label("Status", 8, y0 + 22, 56, 20)
-    layout["Status"] = { Style = "Text", Position = { 70, y0 + 22 }, Size = { W - 78, 22 }, FontSize = 11 }
+    label("Status", 8, y0 + 22, 56, 16)
+    layout["Status"] = { Style = "Text", Position = { 70, y0 + 22 }, Size = { W - 78, 16 }, FontSize = 11 }
 
     local cols = {
       { "SwitchesOnline", "Switches Online", 120 },
@@ -200,29 +200,29 @@ function GetControlLayout(props)
     local x = 8
     for _, c in ipairs(cols) do
       label(c[2], x, y0 + 50, c[3], 16, "Center")
-      text(c[1], x, y0 + 68, c[3], 22, true)
+      text(c[1], x, y0 + 68, c[3], 16, true)
       x = x + c[3] + 4
     end
 
     -- Control
     local y1 = y0 + 106
     group("Control", 0, y1, W, 112)
-    button("SelectAll", "Select All", 8, y1 + 22, 90, 28)
-    button("SelectNone", "Clear", 102, y1 + 22, 90, 28)
-    button("On", what .. " On", 210, y1 + 22, 90, 28, { 0, 170, 60 })
-    button("Off", what .. " Off", 304, y1 + 22, 90, 28, { 210, 40, 40 })
-    label("Last action", 8, y1 + 58, 70, 20, "Left")
-    text("LastAction", 80, y1 + 58, 314, 20, true)
+    button("SelectAll", "Select All", 8, y1 + 22, 90, 16)
+    button("SelectNone", "Clear", 102, y1 + 22, 90, 16)
+    button("On", what .. " On", 210, y1 + 22, 90, 16, { 0, 170, 60 })
+    button("Off", what .. " Off", 304, y1 + 22, 90, 16, { 210, 40, 40 })
+    label("Last action", 8, y1 + 58, 70, 16, "Left")
+    text("LastAction", 80, y1 + 58, 314, 16, true)
 
     local hx = 420
-    button("AllOn", "Hold: All On", hx, y1 + 22, 160, 28, { 0, 170, 60 })
-    button("AllOff", "Hold: All Off", hx + 168, y1 + 22, 160, 28, { 210, 40, 40 })
+    button("AllOn", "Hold: All On", hx, y1 + 22, 160, 16, { 0, 170, 60 })
+    button("AllOff", "Hold: All Off", hx + 168, y1 + 22, 160, 16, { 210, 40, 40 })
     layout["HoldProgress"] = {
       Style = "Meter", MeterStyle = "Level", ShowTextbox = false, Position = { hx, y1 + 54 }, Size = { 328, 8 }
     }
-    text("AllScopeResult", hx, y1 + 66, 328, 20, true)
+    text("AllScopeResult", hx, y1 + 66, 328, 16, true)
     label("Select switches then press On / Off.  Hold All On / All Off for the hold time (Setup page).",
-      8, y1 + 88, W - 16, 16, "Left", 10)
+      8, y1 + 88, W - 16, 16, "Left", 11)
 
     -- Switches
     local y2 = y1 + 118
@@ -235,11 +235,11 @@ function GetControlLayout(props)
     label("Switch Status", cx.st, y2 + 20, W - cx.st - 8, 16, "Center")
     for i = 1, n do
       local y = y2 + 40 + (i - 1) * rowH
-      button(key("Select", i), "Switch " .. i, cx.sel, y, 130, 22)
-      layout[key("SwLed", i)] = { Style = "Led", Position = { cx.led, y + 3 }, Size = { 16, 16 }, Color = { 0, 220, 0 } }
-      text(key("SwState", i), cx.state, y + 1, 156, 20, true)
-      if metering then text(key("SwDraw", i), cx.draw, y + 1, 84, 20, true) end
-      layout[key("SwStatus", i)] = { Style = "Text", Position = { cx.st, y + 1 }, Size = { W - cx.st - 8, 20 }, FontSize = 10 }
+      button(key("Select", i), "Switch " .. i, cx.sel, y, 130, 16)
+      layout[key("SwLed", i)] = { Style = "Led", Position = { cx.led, y }, Size = { 16, 16 }, Color = { 0, 220, 0 } }
+      text(key("SwState", i), cx.state, y, 156, 16, true)
+      if metering then text(key("SwDraw", i), cx.draw, y, 84, 16, true) end
+      layout[key("SwStatus", i)] = { Style = "Text", Position = { cx.st, y }, Size = { W - cx.st - 8, 16 }, FontSize = 11 }
     end
 
   elseif page == "Setup" then
@@ -256,13 +256,13 @@ function GetControlLayout(props)
     label("Resolved", cx.res, y0 + 20, W - cx.res - 8, 16, "Center")
     for i = 1, n do
       local y = y0 + 40 + (i - 1) * rowH
-      label(tostring(i), cx.num, y + 1, 24, 20, "Center")
-      layout[key("ComponentName", i)] = { Style = "ComboBox", Position = { cx.comp, y }, Size = { 174, 22 }, FontSize = 11 }
-      text(key("SwName", i), cx.name, y + 1, 124, 20)
-      text(key("OnPorts", i), cx.on, y + 1, 104, 20)
-      text(key("OffPorts", i), cx.off, y + 1, 104, 20)
+      label(tostring(i), cx.num, y, 24, 16, "Center")
+      layout[key("ComponentName", i)] = { Style = "ComboBox", Position = { cx.comp, y }, Size = { 174, 16 }, FontSize = 11 }
+      text(key("SwName", i), cx.name, y, 124, 16)
+      text(key("OnPorts", i), cx.on, y, 104, 16)
+      text(key("OffPorts", i), cx.off, y, 104, 16)
       layout[key("Resolved", i)] = {
-        Style = "Text", Position = { cx.res, y + 1 }, Size = { W - cx.res - 8, 20 }, FontSize = 10,
+        Style = "Text", Position = { cx.res, y }, Size = { W - cx.res - 8, 16 }, FontSize = 11,
         HTextAlign = "Left", IsReadOnly = true
       }
     end
@@ -272,24 +272,24 @@ function GetControlLayout(props)
     group("Global Settings", 0, y1, W, 214)
     local lx, lw, vx = 8, 170, 184
     local function row(r) return y1 + 22 + (r - 1) * 26 end
-    label("All On / All Off Switches", lx, row(1), lw, 20)
-    text("AllScope", vx, row(1), 200, 20)
-    label("e.g.  all  |  1-4  |  1-2, 4  |  all except 3  |  !3", vx + 208, row(1), 360, 20, "Left", 10)
-    label("Default On Ports", lx, row(2), lw, 20)
-    text("DefaultOnPorts", vx, row(2), 200, 20)
-    label("Default Off Ports", lx, row(3), lw, 20)
-    text("DefaultOffPorts", vx, row(3), 200, 20)
-    label("Ports: all  |  1-6  |  all except 1  |  !5, !7  |  none", vx + 208, row(2), 360, 20, "Left", 10)
+    label("All On / All Off Switches", lx, row(1), lw, 16)
+    text("AllScope", vx, row(1), 200, 16)
+    label("e.g.  all  |  1-4  |  1-2, 4  |  all except 3  |  !3", vx + 208, row(1), 360, 16, "Left", 11)
+    label("Default On Ports", lx, row(2), lw, 16)
+    text("DefaultOnPorts", vx, row(2), 200, 16)
+    label("Default Off Ports", lx, row(3), lw, 16)
+    text("DefaultOffPorts", vx, row(3), 200, 16)
+    label("Ports: all  |  1-6  |  all except 1  |  !5, !7  |  none", vx + 208, row(2), 360, 16, "Left", 11)
     label(portMode and "Per-switch fields override these. Core/trunk ports are never disabled."
-      or "Per-switch fields above override these.", vx + 208, row(3), 360, 20, "Left", 10)
-    label("Hold Time (s)", lx, row(4), lw, 20)
-    text("HoldTime", vx, row(4), 80, 20)
-    label("Switch Stagger (s)", lx, row(5), lw, 20)
-    text("Stagger", vx, row(5), 80, 20)
-    label("Poll Interval (s)", lx, row(6), lw, 20)
-    text("PollInterval", vx, row(6), 80, 20)
-    label("Deselect After On/Off", lx, row(7), lw, 20)
-    button("AutoClear", "", vx, row(7), 36, 20)
+      or "Per-switch fields above override these.", vx + 208, row(3), 360, 16, "Left", 11)
+    label("Hold Time (s)", lx, row(4), lw, 16)
+    text("HoldTime", vx, row(4), 80, 16)
+    label("Switch Stagger (s)", lx, row(5), lw, 16)
+    text("Stagger", vx, row(5), 80, 16)
+    label("Poll Interval (s)", lx, row(6), lw, 16)
+    text("PollInterval", vx, row(6), 80, 16)
+    label("Deselect After On/Off", lx, row(7), lw, 16)
+    button("AutoClear", "", vx, row(7), 36, 16)
   end
 
   return layout, graphics
