@@ -11,7 +11,7 @@
 
 PluginInfo = {
   Name = "Netgear~PoE Multi Controller",
-  Version = "1.0.0",
+  Version = "1.0.1",
   Id = "4b5adc71-6fb7-476a-b423-aed8d5b20d75",
   Author = "James Martin",
   Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status.",
@@ -123,7 +123,7 @@ function GetControls(props)
   add({ Name = "HoldTime", ControlType = "Knob", ControlUnit = "Seconds", Min = 0, Max = 10, DefaultValue = 2 })
   add({ Name = "Stagger", ControlType = "Knob", ControlUnit = "Seconds", Min = 0, Max = 5, DefaultValue = 0.5 })
   add({ Name = "PollInterval", ControlType = "Knob", ControlUnit = "Seconds", Min = 1, Max = 60, DefaultValue = 3 })
-  add({ Name = "AutoClear", ControlType = "Button", ButtonType = "Toggle", DefaultValue = true })
+  add({ Name = "AutoClear", ControlType = "Button", ButtonType = "Toggle", DefaultValue = false })
 
   return ctls
 end
@@ -288,7 +288,7 @@ function GetControlLayout(props)
     text("Stagger", vx, row(5), 80, 20)
     label("Poll Interval (s)", lx, row(6), lw, 20)
     text("PollInterval", vx, row(6), 80, 20)
-    label("Clear Selection After On/Off", lx, row(7), lw, 20)
+    label("Deselect After On/Off", lx, row(7), lw, 20)
     button("AutoClear", "", vx, row(7), 36, 20)
   end
 
