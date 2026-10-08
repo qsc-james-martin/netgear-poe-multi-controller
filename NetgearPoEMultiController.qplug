@@ -11,7 +11,7 @@
 
 PluginInfo = {
   Name = "Netgear~PoE Multi Controller",
-  Version = "1.0.5",
+  Version = "1.0.6",
   Id = "4b5adc71-6fb7-476a-b423-aed8d5b20d75",
   Author = "James Martin",
   Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status.",
@@ -219,7 +219,9 @@ function GetControlLayout(props)
       x = x + c[3] + c[4] + 16
     end
     local h0 = sy - y0 + 24
+    -- Groups are filled; move this one behind the labels drawn above
     group("Combined", 0, y0, W, h0)
+    table.insert(graphics, 1, table.remove(graphics))
     label("Status", 8, y0 + 20, 40, 16)
     layout["Status"] = { Style = "Text", Position = { 52, y0 + 20 }, Size = { W - 60, 16 }, FontSize = 11 }
 
@@ -293,6 +295,7 @@ function GetControlLayout(props)
 
     -- Global settings
     local y1 = y0 + hAssign + 4
+    local firstGraphic = #graphics + 1
     local lx, lw, vx = 8, 150, 162
     local hx, hw = vx + 128, W - vx - 136
     local function row(r) return y1 + 20 + (r - 1) * 20 end
@@ -321,7 +324,9 @@ function GetControlLayout(props)
       layout["MeterSource"] = { Style = "ComboBox", Position = { vx, row(8) }, Size = { 120, 16 }, FontSize = 11 }
       label(METER_SOURCE, hx, row(8), hw, 16, "Left")
     end
+    -- Groups are filled; move this one behind its labels
     group("Global Settings", 0, y1, W, 24 + rows * 20)
+    table.insert(graphics, firstGraphic, table.remove(graphics))
   end
 
   return layout, graphics
