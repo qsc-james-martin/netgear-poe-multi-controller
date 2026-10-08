@@ -11,7 +11,7 @@
 
 PluginInfo = {
   Name = "Netgear~PoE Multi Controller",
-  Version = "1.0.4",
+  Version = "1.0.5",
   Id = "4b5adc71-6fb7-476a-b423-aed8d5b20d75",
   Author = "James Martin",
   Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status.",
@@ -147,7 +147,7 @@ function GetControlLayout(props)
   local metering = props["Metering"].Value == "On"
   local portMode = props["Control"].Value == "Port"
   local page = PageNames[props["page_index"].Value]
-  local W = 760
+  local W = 640
 
   local function key(name, i)
     if n > 1 then return name .. " " .. i end
@@ -183,84 +183,108 @@ function GetControlLayout(props)
   end
 
   local what = portMode and "Ports" or "PoE"
+  local STATS = {
+    { "SwitchesOnline", "Switches Online", 88, 48 },
+    { "PortsOn", what .. " On", 52, 56 },
+    { "PortsPowered", "Ports Powered", 78, 40 },
+  }
+  if metering then table.insert(STATS, { "TotalDraw", "Total PoE Draw", 84, 64 }) end
+  local ON_LEGEND, OFF_LEGEND = what .. " On", what .. " Off"
+  local HELP = "Select switches then press On / Off.  Hold All On / All Off for the hold time (Setup page)."
+  local ROWS_TITLE, ROW_NAME, LED, STATUS_TITLE, STATUS_CTL = "Switches", "Switch", "SwLed", "Switch Status", "SwStatus"
+  local COLS = {
+    { "SwState", "State", 156 },
+    { "SwDraw", "PoE Draw", 64, metering = true },
+  }
+  local ASSIGN_TITLE = "Switch Assignment  (blank port fields use the defaults below)"
+  local NAME_CTL, ON_FIELD, OFF_FIELD = "SwName", { "OnPorts", "On Ports" }, { "OffPorts", "Off Ports" }
+  local SCOPE_LABEL = "All On / All Off Switches"
+  local SCOPE_HINT = "e.g.  all  |  1-4  |  1-2, 4  |  all except 3  |  !3"
+  local DEFAULT_ON, DEFAULT_OFF = { "DefaultOnPorts", "Default On Ports" }, { "DefaultOffPorts", "Default Off Ports" }
+  local FIELD_HINT = "Ports: all  |  1-6  |  all except 1  |  !5, !7  |  none"
+  local OVERRIDE_HINT = "Per-switch fields above override these."
+  local EXTRA_HINT = portMode and "Core/trunk ports are never disabled." or nil
+  local STAGGER_LABEL = "Switch Stagger (s)"
+  local METER_SOURCE = nil
 
   if page == "Control" then
-    -- Combined
+    -- Combined: status row, then inline "label value" stats that wrap
     local y0 = 0
-    group("Combined", 0, y0, W, 100)
-    label("Status", 8, y0 + 22, 56, 16)
-    layout["Status"] = { Style = "Text", Position = { 70, y0 + 22 }, Size = { W - 78, 16 }, FontSize = 11 }
-
-    local cols = {
-      { "SwitchesOnline", "Switches Online", 120 },
-      { "PortsOn", what .. " On", 120 },
-      { "PortsPowered", "Ports Powered", 120 },
-    }
-    if metering then table.insert(cols, { "TotalDraw", "Total PoE Draw", 140 }) end
+    local sy = y0 + 40
     local x = 8
-    for _, c in ipairs(cols) do
-      label(c[2], x, y0 + 50, c[3], 16, "Center")
-      text(c[1], x, y0 + 68, c[3], 16, true)
-      x = x + c[3] + 4
+    for _, c in ipairs(STATS) do
+      if x + c[3] + c[4] + 4 > W - 8 then x, sy = 8, sy + 20 end
+      label(c[2], x, sy, c[3], 16)
+      text(c[1], x + c[3] + 4, sy, c[4], 16, true)
+      x = x + c[3] + c[4] + 16
     end
+    local h0 = sy - y0 + 24
+    group("Combined", 0, y0, W, h0)
+    label("Status", 8, y0 + 20, 40, 16)
+    layout["Status"] = { Style = "Text", Position = { 52, y0 + 20 }, Size = { W - 60, 16 }, FontSize = 11 }
 
     -- Control
-    local y1 = y0 + 106
-    group("Control", 0, y1, W, 112)
-    button("SelectAll", "Select All", 8, y1 + 22, 90, 16)
-    button("SelectNone", "Clear", 102, y1 + 22, 90, 16)
-    button("On", what .. " On", 210, y1 + 22, 90, 16, { 0, 170, 60 })
-    button("Off", what .. " Off", 304, y1 + 22, 90, 16, { 210, 40, 40 })
-    label("Last action", 8, y1 + 58, 70, 16, "Left")
-    text("LastAction", 80, y1 + 58, 314, 16, true)
-
-    local hx = 420
-    button("AllOn", "Hold: All On", hx, y1 + 22, 160, 16, { 0, 170, 60 })
-    button("AllOff", "Hold: All Off", hx + 168, y1 + 22, 160, 16, { 210, 40, 40 })
+    local y1 = y0 + h0 + 4
+    group("Control", 0, y1, W, 84)
+    local r1, r2, r3 = y1 + 20, y1 + 40, y1 + 60
+    button("SelectAll", "Select All", 8, r1, 64, 16)
+    button("SelectNone", "Clear", 76, r1, 48, 16)
+    button("On", ON_LEGEND, 136, r1, 56, 16, { 0, 170, 60 })
+    button("Off", OFF_LEGEND, 196, r1, 56, 16, { 210, 40, 40 })
+    button("AllOn", "Hold: All On", 264, r1, 76, 16, { 0, 170, 60 })
+    button("AllOff", "Hold: All Off", 344, r1, 76, 16, { 210, 40, 40 })
     layout["HoldProgress"] = {
-      Style = "Meter", MeterStyle = "Level", ShowTextbox = false, Position = { hx, y1 + 54 }, Size = { 328, 8 }
+      Style = "Meter", MeterStyle = "Level", ShowTextbox = false, Position = { 428, r1 + 4 }, Size = { W - 436, 8 }
     }
-    text("AllScopeResult", hx, y1 + 66, 328, 16, true)
-    label("Select switches then press On / Off.  Hold All On / All Off for the hold time (Setup page).",
-      8, y1 + 88, W - 16, 16, "Left", 11)
+    label("Last action", 8, r2, 64, 16, "Left")
+    text("LastAction", 76, r2, 344, 16, true)
+    text("AllScopeResult", 428, r2, W - 436, 16, true)
+    label(HELP, 8, r3, W - 16, 16, "Left")
 
-    -- Switches
-    local y2 = y1 + 118
-    local rowH = 26
-    group("Switches", 0, y2, W, 50 + n * rowH)
-    local cx = { sel = 8, led = 144, state = 168, draw = 332, st = metering and 424 or 332 }
-    label("Select", cx.sel, y2 + 20, 130, 16, "Center")
-    label("State", cx.state, y2 + 20, 156, 16, "Center")
-    if metering then label("PoE Draw", cx.draw, y2 + 20, 84, 16, "Center") end
-    label("Switch Status", cx.st, y2 + 20, W - cx.st - 8, 16, "Center")
+    -- Rows
+    local y2 = y1 + 84 + 4
+    group(ROWS_TITLE, 0, y2, W, 44 + n * 20)
+    local stx = 122
+    label("Select", 8, y2 + 20, 90, 16, "Center")
+    for _, c in ipairs(COLS) do
+      if not c.metering or metering then
+        label(c[2], stx, y2 + 20, c[3], 16, "Center")
+        stx = stx + c[3] + 4
+      end
+    end
+    label(STATUS_TITLE, stx, y2 + 20, W - stx - 8, 16, "Center")
     for i = 1, n do
-      local y = y2 + 40 + (i - 1) * rowH
-      button(key("Select", i), "Switch " .. i, cx.sel, y, 130, 16)
-      layout[key("SwLed", i)] = { Style = "Led", Position = { cx.led, y }, Size = { 16, 16 }, Color = { 0, 220, 0 } }
-      text(key("SwState", i), cx.state, y, 156, 16, true)
-      if metering then text(key("SwDraw", i), cx.draw, y, 84, 16, true) end
-      layout[key("SwStatus", i)] = { Style = "Text", Position = { cx.st, y }, Size = { W - cx.st - 8, 16 }, FontSize = 11 }
+      local y = y2 + 40 + (i - 1) * 20
+      button(key("Select", i), ROW_NAME .. " " .. i, 8, y, 90, 16)
+      layout[key(LED, i)] = { Style = "Led", Position = { 102, y }, Size = { 16, 16 }, Color = { 0, 220, 0 } }
+      local cx = 122
+      for _, c in ipairs(COLS) do
+        if not c.metering or metering then
+          text(key(c[1], i), cx, y, c[3], 16, true)
+          cx = cx + c[3] + 4
+        end
+      end
+      layout[key(STATUS_CTL, i)] = { Style = "Text", Position = { cx, y }, Size = { W - cx - 8, 16 }, FontSize = 11 }
     end
 
   elseif page == "Setup" then
-    local rowH = 26
-    -- Switch assignment
+    -- Assignment
     local y0 = 0
-    local hAssign = 50 + n * rowH
-    group("Switch Assignment  (blank port fields use the defaults below)", 0, y0, W, hAssign)
-    local cx = { num = 8, comp = 36, name = 214, on = 342, off = 450, res = 558 }
-    label("Component", cx.comp, y0 + 20, 174, 16, "Center")
-    label("Display Name", cx.name, y0 + 20, 124, 16, "Center")
-    label("On Ports", cx.on, y0 + 20, 104, 16, "Center")
-    label("Off Ports", cx.off, y0 + 20, 104, 16, "Center")
+    local hAssign = 44 + n * 20
+    group(ASSIGN_TITLE, 0, y0, W, hAssign)
+    local cx = { num = 8, comp = 32, name = 176, on = 280, off = 364, res = 448 }
+    label("Component", cx.comp, y0 + 20, 140, 16, "Center")
+    label("Display Name", cx.name, y0 + 20, 100, 16, "Center")
+    label(ON_FIELD[2], cx.on, y0 + 20, 80, 16, "Center")
+    label(OFF_FIELD[2], cx.off, y0 + 20, 80, 16, "Center")
     label("Resolved", cx.res, y0 + 20, W - cx.res - 8, 16, "Center")
     for i = 1, n do
-      local y = y0 + 40 + (i - 1) * rowH
-      label(tostring(i), cx.num, y, 24, 16, "Center")
-      layout[key("ComponentName", i)] = { Style = "ComboBox", Position = { cx.comp, y }, Size = { 174, 16 }, FontSize = 11 }
-      text(key("SwName", i), cx.name, y, 124, 16)
-      text(key("OnPorts", i), cx.on, y, 104, 16)
-      text(key("OffPorts", i), cx.off, y, 104, 16)
+      local y = y0 + 40 + (i - 1) * 20
+      label(tostring(i), cx.num, y, 20, 16, "Center")
+      layout[key("ComponentName", i)] = { Style = "ComboBox", Position = { cx.comp, y }, Size = { 140, 16 }, FontSize = 11 }
+      text(key(NAME_CTL, i), cx.name, y, 100, 16)
+      text(key(ON_FIELD[1], i), cx.on, y, 80, 16)
+      text(key(OFF_FIELD[1], i), cx.off, y, 80, 16)
       layout[key("Resolved", i)] = {
         Style = "Text", Position = { cx.res, y }, Size = { W - cx.res - 8, 16 }, FontSize = 11,
         HTextAlign = "Left", IsReadOnly = true
@@ -268,28 +292,36 @@ function GetControlLayout(props)
     end
 
     -- Global settings
-    local y1 = y0 + hAssign + 6
-    group("Global Settings", 0, y1, W, 214)
-    local lx, lw, vx = 8, 170, 184
-    local function row(r) return y1 + 22 + (r - 1) * 26 end
-    label("All On / All Off Switches", lx, row(1), lw, 16)
-    text("AllScope", vx, row(1), 200, 16)
-    label("e.g.  all  |  1-4  |  1-2, 4  |  all except 3  |  !3", vx + 208, row(1), 360, 16, "Left", 11)
-    label("Default On Ports", lx, row(2), lw, 16)
-    text("DefaultOnPorts", vx, row(2), 200, 16)
-    label("Default Off Ports", lx, row(3), lw, 16)
-    text("DefaultOffPorts", vx, row(3), 200, 16)
-    label("Ports: all  |  1-6  |  all except 1  |  !5, !7  |  none", vx + 208, row(2), 360, 16, "Left", 11)
-    label(portMode and "Per-switch fields override these. Core/trunk ports are never disabled."
-      or "Per-switch fields above override these.", vx + 208, row(3), 360, 16, "Left", 11)
+    local y1 = y0 + hAssign + 4
+    local lx, lw, vx = 8, 150, 162
+    local hx, hw = vx + 128, W - vx - 136
+    local function row(r) return y1 + 20 + (r - 1) * 20 end
+    label(SCOPE_LABEL, lx, row(1), lw, 16)
+    text("AllScope", vx, row(1), 120, 16)
+    label(SCOPE_HINT, hx, row(1), hw, 16, "Left")
+    label(DEFAULT_ON[2], lx, row(2), lw, 16)
+    text(DEFAULT_ON[1], vx, row(2), 120, 16)
+    label(FIELD_HINT, hx, row(2), hw, 16, "Left")
+    label(DEFAULT_OFF[2], lx, row(3), lw, 16)
+    text(DEFAULT_OFF[1], vx, row(3), 120, 16)
+    label(OVERRIDE_HINT, hx, row(3), hw, 16, "Left")
     label("Hold Time (s)", lx, row(4), lw, 16)
-    text("HoldTime", vx, row(4), 80, 16)
-    label("Switch Stagger (s)", lx, row(5), lw, 16)
-    text("Stagger", vx, row(5), 80, 16)
+    text("HoldTime", vx, row(4), 60, 16)
+    if EXTRA_HINT then label(EXTRA_HINT, hx, row(4), hw, 16, "Left") end
+    label(STAGGER_LABEL, lx, row(5), lw, 16)
+    text("Stagger", vx, row(5), 60, 16)
     label("Poll Interval (s)", lx, row(6), lw, 16)
-    text("PollInterval", vx, row(6), 80, 16)
+    text("PollInterval", vx, row(6), 60, 16)
     label("Deselect After On/Off", lx, row(7), lw, 16)
     button("AutoClear", "", vx, row(7), 36, 16)
+    local rows = 7
+    if METER_SOURCE and metering then
+      rows = 8
+      label("Meter Source", lx, row(8), lw, 16)
+      layout["MeterSource"] = { Style = "ComboBox", Position = { vx, row(8) }, Size = { 120, 16 }, FontSize = 11 }
+      label(METER_SOURCE, hx, row(8), hw, 16, "Left")
+    end
+    group("Global Settings", 0, y1, W, 24 + rows * 20)
   end
 
   return layout, graphics
