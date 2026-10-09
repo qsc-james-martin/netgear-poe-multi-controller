@@ -11,7 +11,7 @@
 
 PluginInfo = {
   Name = "Netgear~PoE Multi Controller",
-  Version = "1.0.6",
+  Version = "1.0.8",
   Id = "4b5adc71-6fb7-476a-b423-aed8d5b20d75",
   Author = "James Martin",
   Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status.",
@@ -329,6 +329,44 @@ function GetControlLayout(props)
     table.insert(graphics, firstGraphic, table.remove(graphics))
   end
 
+  local prettyNames = {
+    Status = "Combined~Status",
+    SwitchesOnline = "Combined~Switches Online",
+    PortsOn = "Combined~" .. what .. " On",
+    PortsPowered = "Combined~Ports Powered",
+    TotalDraw = "Combined~Total PoE Draw",
+    SelectAll = "Control~Select All",
+    SelectNone = "Control~Clear Selection",
+    On = "Control~" .. ON_LEGEND,
+    Off = "Control~" .. OFF_LEGEND,
+    AllOn = "Control~Hold All On",
+    AllOff = "Control~Hold All Off",
+    HoldProgress = "Control~Hold Progress",
+    LastAction = "Control~Last Action",
+    AllScopeResult = "Control~Resolved All Scope",
+    AllScope = "Global Settings~All On / All Off Switches",
+    DefaultOnPorts = "Global Settings~Default On Ports",
+    DefaultOffPorts = "Global Settings~Default Off Ports",
+    HoldTime = "Global Settings~Hold Time",
+    Stagger = "Global Settings~Switch Stagger",
+    PollInterval = "Global Settings~Poll Interval",
+    AutoClear = "Global Settings~Deselect After On/Off"
+  }
+  local deviceNames = {
+    Select = "Select", SwLed = "Online", SwState = "State",
+    SwDraw = "PoE Draw", SwStatus = "Status", ComponentName = "Setup~Component",
+    SwName = "Setup~Display Name", OnPorts = "Setup~On Ports",
+    OffPorts = "Setup~Off Ports", Resolved = "Setup~Resolved Ports"
+  }
+  for i = 1, n do
+    for name, pretty in pairs(deviceNames) do
+      prettyNames[key(name, i)] = "Switches~Switch " .. i .. "~" .. pretty
+    end
+  end
+  for name, entry in pairs(layout) do
+    entry.PrettyName = prettyNames[name]
+  end
+
   return layout, graphics
 end
 
@@ -338,6 +376,7 @@ end
 if Controls then
   local N = Properties["Switch Count"].Value
   local DEBUG = Properties["Debug Print"].Value == "Yes"
+  local EMULATING = System ~= nil and System.IsEmulating == true
   local METERING = Properties["Metering"].Value == "On"
   local PORT_MODE = Properties["Control"].Value == "Port"
   local CTL_PREFIX = PORT_MODE and "EnablePort" or "EnablePoE"
@@ -661,6 +700,8 @@ if Controls then
         if dis and dis.Boolean then
           code, msg = 3, "Disabled"
         end
+        -- In emulation the device plugins are disabled / not present; don't report that as a fault
+        if EMULATING then code, msg = 0, "OK" end
         st.Value = code
         st.String = msg
         if code == 0 then
@@ -686,7 +727,7 @@ if Controls then
       else code = 2 end
       Controls.Status.Value = code
       if code == 0 then
-        Controls.Status.String = ("All %d switches OK"):format(healthy)
+        Controls.Status.String = ("All %d switches OK"):format(healthy) .. (EMULATING and " (emulating)" or "")
       else
         Controls.Status.String = ("%d/%d OK - %s"):format(healthy, assignedCount, table.concat(issues, "; "))
       end
