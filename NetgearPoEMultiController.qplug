@@ -11,7 +11,7 @@
 
 PluginInfo = {
   Name = "Netgear~PoE Multi Controller",
-  Version = "1.0.8",
+  Version = "1.0.9",
   Id = "4b5adc71-6fb7-476a-b423-aed8d5b20d75",
   Author = "James Martin",
   Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status.",
@@ -102,6 +102,9 @@ function GetControls(props)
   add({ Name = "AllScopeResult", ControlType = "Indicator", IndicatorType = "Text", PinStyle = "Output" })
 
   -- Per-switch feedback
+  add({ Name = "RowOn", ControlType = "Button", ButtonType = "Trigger", Count = n })
+  add({ Name = "RowOff", ControlType = "Button", ButtonType = "Trigger", Count = n })
+  add({ Name = "RowPower", ControlType = "Button", ButtonType = "Toggle", Count = n })
   add({ Name = "SwLed", ControlType = "Indicator", IndicatorType = "Led", Count = n, PinStyle = "Output" })
   add({ Name = "SwState", ControlType = "Indicator", IndicatorType = "Text", Count = n, PinStyle = "Output" })
   if metering then
@@ -246,8 +249,9 @@ function GetControlLayout(props)
     -- Rows
     local y2 = y1 + 84 + 4
     group(ROWS_TITLE, 0, y2, W, 44 + n * 20)
-    local stx = 122
-    label("Select", 8, y2 + 20, 90, 16, "Center")
+    local stx = 216
+    label("Select", 8, y2 + 20, 76, 16, "Center")
+    label("On / Off / Power", 108, y2 + 20, 104, 16, "Center")
     for _, c in ipairs(COLS) do
       if not c.metering or metering then
         label(c[2], stx, y2 + 20, c[3], 16, "Center")
@@ -257,9 +261,12 @@ function GetControlLayout(props)
     label(STATUS_TITLE, stx, y2 + 20, W - stx - 8, 16, "Center")
     for i = 1, n do
       local y = y2 + 40 + (i - 1) * 20
-      button(key("Select", i), ROW_NAME .. " " .. i, 8, y, 90, 16)
-      layout[key(LED, i)] = { Style = "Led", Position = { 102, y }, Size = { 16, 16 }, Color = { 0, 220, 0 } }
-      local cx = 122
+      button(key("Select", i), ROW_NAME .. " " .. i, 8, y, 76, 16)
+      layout[key(LED, i)] = { Style = "Led", Position = { 88, y }, Size = { 16, 16 }, Color = { 0, 220, 0 } }
+      button(key("RowOn", i), "On", 108, y, 32, 16, { 0, 170, 60 })
+      button(key("RowOff", i), "Off", 142, y, 32, 16, { 210, 40, 40 })
+      button(key("RowPower", i), "", 176, y, 36, 16, { 0, 170, 60 })
+      local cx = 216
       for _, c in ipairs(COLS) do
         if not c.metering or metering then
           text(key(c[1], i), cx, y, c[3], 16, true)
@@ -353,7 +360,7 @@ function GetControlLayout(props)
     AutoClear = "Global Settings~Deselect After On/Off"
   }
   local deviceNames = {
-    Select = "Select", SwLed = "Online", SwState = "State",
+    Select = "Select", RowOn = "On", RowOff = "Off", RowPower = "Power On/Off", SwLed = "Online", SwState = "State",
     SwDraw = "PoE Draw", SwStatus = "Status", ComponentName = "Setup~Component",
     SwName = "Setup~Display Name", OnPorts = "Setup~On Ports",
     OffPorts = "Setup~Off Ports", Resolved = "Setup~Resolved Ports"
@@ -394,7 +401,7 @@ if Controls then
   end
 
   local C = {}
-  for _, name in ipairs({ "Select", "SwLed", "SwState", "SwDraw", "SwStatus",
+  for _, name in ipairs({ "Select", "RowOn", "RowOff", "RowPower", "SwLed", "SwState", "SwDraw", "SwStatus",
     "ComponentName", "SwName", "OnPorts", "OffPorts", "Resolved" }) do
     C[name] = arr(Controls[name])
   end
@@ -627,6 +634,9 @@ if Controls then
     return ("%.1f W"):format(v)
   end
 
+  -- Per-row toggle shows the commanded state until feedback has had time to catch up
+  local pending = {}
+
   local function update()
     local totDraw
     local onlineCount, assignedCount = 0, 0
@@ -640,6 +650,7 @@ if Controls then
 
       if not s or not s.online then
         C.SwLed[i].Boolean = false
+        C.RowPower[i].Boolean = false
         C.SwState[i].String = s and s.unassigned and "" or "Offline"
         if METERING then C.SwDraw[i].String = "" end
         if s and s.unassigned then
@@ -684,6 +695,10 @@ if Controls then
         else stateText = "Partial" end
         C.SwState[i].String = ("%s (%d/%d)  %d powered"):format(stateText, count, total, pw)
         C.SwLed[i].Boolean = count > 0 and not (allOff and anyOffSet)
+        if not pending[i] or Timer.Now() >= pending[i] then
+          pending[i] = nil
+          C.RowPower[i].Boolean = C.SwLed[i].Boolean
+        end
 
         if METERING then
           C.SwDraw[i].String = fmtW(draw)
@@ -769,6 +784,8 @@ if Controls then
         end
         delay = delay + stagger
         C.SwState[i].String = on and "Switching on..." or "Switching off..."
+        C.RowPower[i].Boolean = on
+        pending[i] = Timer.Now() + delay + 5
       end
     end
     local summary = #names > 0 and table.concat(names, ", ") or "no online switches"
@@ -805,6 +822,20 @@ if Controls then
     for i = 1, N do C.Select[i].Boolean = sws[i] ~= nil and sws[i].online end
   end
   Controls.SelectNone.EventHandler = clearSelection
+
+  for i = 1, N do
+    C.RowOn[i].EventHandler = function() run({ i }, true, "Row") end
+    C.RowOff[i].EventHandler = function() run({ i }, false, "Row") end
+    C.RowPower[i].EventHandler = function(ctl)
+      local d = sws[i]
+      if d and d.online then
+        run({ i }, ctl.Boolean, "Row")
+      else
+        ctl.Boolean = false
+        Controls.LastAction.String = displayName(i) .. " is offline"
+      end
+    end
+  end
 
   ------------------------------------------------------------------
   -- Press and hold All On / All Off
