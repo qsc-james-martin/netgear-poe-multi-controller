@@ -8,10 +8,11 @@
 -- Requirements: each Netgear plugin needs Script Access enabled and Write Access = Yes
 -- (otherwise EnablePoE N / EnablePort N controls are not exposed).
 -- Netgear components are found by plugin GUID 5ba63a53-4459-4be4-938f-f3a40c055026.
+-- Device health mirrors the source Status control; Disable does not override it.
 
 PluginInfo = {
   Name = "Netgear~PoE Multi Controller",
-  Version = "1.0.9",
+  Version = "1.0.10",
   Id = "4b5adc71-6fb7-476a-b423-aed8d5b20d75",
   Author = "James Martin",
   Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status.",
@@ -705,15 +706,17 @@ if Controls then
           if draw then totDraw = (totDraw or 0) + draw end
         end
 
-        local code, msg = 0, "OK"
+        local code, msg = 2, "Status control unavailable (check Script Access)"
         local sc = readCtl(s, s.ctl.status)
         if sc then
-          code = tonumber(sc.Value) or 0
-          msg = sc.String ~= "" and sc.String or msg
-        end
-        local dis = readCtl(s, s.ctl.disable)
-        if dis and dis.Boolean then
-          code, msg = 3, "Disabled"
+          local value = tonumber(sc.Value)
+          if value and value >= 0 and value <= 5 and value % 1 == 0 then
+            code = value
+            local statusNames = { [0] = "OK", "Compromised", "Fault", "Not Present", "Missing", "Initializing" }
+            msg = sc.String ~= "" and sc.String or statusNames[code]
+          else
+            msg = "Invalid source Status value"
+          end
         end
         -- In emulation the device plugins are disabled / not present; don't report that as a fault
         if EMULATING then code, msg = 0, "OK" end
