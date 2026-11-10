@@ -12,11 +12,10 @@
 
 PluginInfo = {
   Name = "Netgear~PoE Multi Controller",
-  Version = "1.0.10",
+  Version = "1.0.12",
   Id = "4b5adc71-6fb7-476a-b423-aed8d5b20d75",
   Author = "James Martin",
-  Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status.",
-  ShowDebug = true
+  Description = "Groups multiple Netgear switch plugins: selective PoE/port on/off, hold-to-switch all, port filters and combined status."
 }
 
 function GetColor(props)
@@ -47,15 +46,8 @@ function GetProperties()
   })
   table.insert(props, {
     Name = "Metering",
-    Type = "enum",
-    Choices = { "Off", "On" },
-    Value = "Off"
-  })
-  table.insert(props, {
-    Name = "Debug Print",
-    Type = "enum",
-    Choices = { "No", "Yes" },
-    Value = "No"
+    Type = "boolean",
+    Value = false
   })
   return props
 end
@@ -69,7 +61,7 @@ end
 --------------------------------------------------------------------
 function GetControls(props)
   local n = props["Switch Count"].Value
-  local metering = props["Metering"].Value == "On"
+  local metering = props["Metering"].Value
   local ctls = {}
 
   local function add(t)
@@ -135,7 +127,7 @@ end
 --------------------------------------------------------------------
 -- Layout
 --------------------------------------------------------------------
-local PageNames = { "Control", "Setup" }
+PageNames = { "Control", "Setup" }
 
 function GetPages(props)
   local pages = {}
@@ -148,7 +140,7 @@ end
 function GetControlLayout(props)
   local layout, graphics = {}, {}
   local n = props["Switch Count"].Value
-  local metering = props["Metering"].Value == "On"
+  local metering = props["Metering"].Value
   local portMode = props["Control"].Value == "Port"
   local page = PageNames[props["page_index"].Value]
   local W = 640
@@ -382,47 +374,46 @@ end
 -- Runtime
 --------------------------------------------------------------------
 if Controls then
-  local N = Properties["Switch Count"].Value
-  local DEBUG = Properties["Debug Print"].Value == "Yes"
-  local EMULATING = System ~= nil and System.IsEmulating == true
-  local METERING = Properties["Metering"].Value == "On"
-  local PORT_MODE = Properties["Control"].Value == "Port"
-  local CTL_PREFIX = PORT_MODE and "EnablePort" or "EnablePoE"
-  local WHAT = PORT_MODE and "ports" or "PoE"
+  N = Properties["Switch Count"].Value
+  EMULATING = System ~= nil and System.IsEmulating == true
+  METERING = Properties["Metering"].Value
+  PORT_MODE = Properties["Control"].Value == "Port"
+  CTL_PREFIX = PORT_MODE and "EnablePort" or "EnablePoE"
+  WHAT = PORT_MODE and "ports" or "PoE"
 
-  local function log(...)
-    if DEBUG then print(...) end
+  function log(...)
+    print(...)
   end
 
   -- Controls with Count = 1 are single objects, otherwise arrays
-  local function arr(c)
+  function arr(c)
     if c == nil then return {} end
     if type(c) == "table" and c[1] ~= nil then return c end
     return { c }
   end
 
-  local C = {}
+  C = {}
   for _, name in ipairs({ "Select", "RowOn", "RowOff", "RowPower", "SwLed", "SwState", "SwDraw", "SwStatus",
     "ComponentName", "SwName", "OnPorts", "OffPorts", "Resolved" }) do
     C[name] = arr(Controls[name])
   end
 
-  local function trim(s)
+  function trim(s)
     return ((s or ""):match("^%s*(.-)%s*$"))
   end
 
   ------------------------------------------------------------------
   -- Range parsing: "all", "1-9", "1-4, 6-9", "one to nine", "all except 5", "!10", "none"
   ------------------------------------------------------------------
-  local NumberWords = {
+  NumberWords = {
     one = 1, two = 2, three = 3, four = 4, five = 5, six = 6, seven = 7, eight = 8, nine = 9, ten = 10,
     eleven = 11, twelve = 12, thirteen = 13, fourteen = 14, fifteen = 15, sixteen = 16,
     seventeen = 17, eighteen = 18, nineteen = 19, twenty = 20
   }
-  local ExcludeWords = { except = true, ["not"] = true, exclude = true, excluding = true, but = true, without = true }
+  ExcludeWords = { except = true, ["not"] = true, exclude = true, excluding = true, but = true, without = true }
 
   -- Returns sorted list of numbers in 1..max, and a list of unrecognised tokens.
-  local function parseSet(textIn, max)
+  function parseSet(textIn, max)
     local s = trim(textIn):lower()
     if s == "none" then return {}, {} end
     s = s:gsub("%a+", function(w) return NumberWords[w] and tostring(NumberWords[w]) or w end)
@@ -473,7 +464,7 @@ if Controls then
   end
 
   -- {1,2,3,5,7,8} -> "1-3, 5, 7-8"
-  local function compact(list)
+  function compact(list)
     local parts, i = {}, 1
     while i <= #list do
       local j = i
@@ -494,28 +485,28 @@ if Controls then
   ------------------------------------------------------------------
   -- Netgear plugin. Component Type looks like
   -- %PLUGIN%_5ba63a53-4459-4be4-938f-f3a40c055026_%FP%_<hash>; the hash changes per version.
-  local NetgearPluginId = "5ba63a53-4459-4be4-938f-f3a40c055026"
+  NetgearPluginId = "5ba63a53-4459-4be4-938f-f3a40c055026"
 
-  local PortCtls = {
+  PortCtls = {
     [CTL_PREFIX] = "enable", ConnectedPowered = "powered", Trunk = "trunk", PoEDraw = "draw",
   }
-  local SingleCtls = { Status = "status", Disable = "disable", CorePort = "core" }
+  SingleCtls = { Status = "status", Disable = "disable", CorePort = "core" }
 
-  local sws = {}
+  sws = {}
 
-  local function displayName(i)
+  function displayName(i)
     local nm = trim(C.SwName[i] and C.SwName[i].String)
     if nm == "" then return "Switch " .. i end
     return nm
   end
 
-  local function readCtl(s, cname)
+  function readCtl(s, cname)
     if not cname then return nil end
     local ok, ctl = pcall(function() return s.comp[cname] end)
     if ok then return ctl end
   end
 
-  local function bind(i)
+  function bind(i)
     local s = { index = i, ports = {}, portNums = {}, online = false, ctl = {} }
     sws[i] = s
     s.name = trim(C.ComponentName[i].String)
@@ -556,12 +547,12 @@ if Controls then
     return s
   end
 
-  local function bindAll()
+  function bindAll()
     for i = 1, N do bind(i) end
   end
 
   -- Ports that must never be turned off in Port mode (uplink to Q-SYS core, trunks)
-  local function protectedPorts(s)
+  function protectedPorts(s)
     local prot = {}
     if not PORT_MODE then return prot end
     local core = tonumber((readCtl(s, s.ctl.core) or {}).String or "")
@@ -574,7 +565,7 @@ if Controls then
   end
 
   -- Port list for a switch: "on" or "off"
-  local function portList(i, which)
+  function portList(i, which)
     local s = sws[i]
     if not s or not s.online then return {}, {}, {} end
     local own = which == "on" and C.OnPorts[i] or C.OffPorts[i]
@@ -593,7 +584,7 @@ if Controls then
     return out, bad, skipped
   end
 
-  local function updateResolved(i)
+  function updateResolved(i)
     local s = sws[i]
     local r = C.Resolved[i]
     if not r then return end
@@ -614,11 +605,11 @@ if Controls then
     r.String = str
   end
 
-  local function updateAllResolved()
+  function updateAllResolved()
     for i = 1, N do updateResolved(i) end
   end
 
-  local function allScope()
+  function allScope()
     local list, bad = parseSet(Controls.AllScope.String, N)
     local s = "All On/Off switches: " .. compact(list)
     if #bad > 0 then s = s .. "  (ignored: " .. table.concat(bad, " ") .. ")" end
@@ -629,16 +620,16 @@ if Controls then
   ------------------------------------------------------------------
   -- Status polling
   ------------------------------------------------------------------
-  local function fmtW(v)
+  function fmtW(v)
     if v == nil then return "--" end
     if math.abs(v) >= 100 then return ("%.0f W"):format(v) end
     return ("%.1f W"):format(v)
   end
 
   -- Per-row toggle shows the commanded state until feedback has had time to catch up
-  local pending = {}
+  pending = {}
 
-  local function update()
+  function update()
     local totDraw
     local onlineCount, assignedCount = 0, 0
     local portsOn, portsTotal, powered = 0, 0, 0
@@ -755,7 +746,7 @@ if Controls then
   ------------------------------------------------------------------
   -- Switching
   ------------------------------------------------------------------
-  local function switchOne(i, on)
+  function switchOne(i, on)
     local s = sws[i]
     if not s or not s.online then return 0 end
     local list = portList(i, on and "on" or "off")
@@ -767,13 +758,13 @@ if Controls then
     return #list
   end
 
-  local refreshTimer = Timer.New()
+  refreshTimer = Timer.New()
   refreshTimer.EventHandler = function()
     refreshTimer:Stop()
     update()
   end
 
-  local function run(indices, on, source)
+  function run(indices, on, source)
     local stagger = math.max(Controls.Stagger.Value, 0)
     local names, delay = {}, 0
     for _, i in ipairs(indices) do
@@ -797,7 +788,7 @@ if Controls then
     refreshTimer:Start(delay + 1.5)
   end
 
-  local function selectedIndices()
+  function selectedIndices()
     local list = {}
     for i = 1, N do
       if C.Select[i].Boolean then table.insert(list, i) end
@@ -805,11 +796,11 @@ if Controls then
     return list
   end
 
-  local function clearSelection()
+  function clearSelection()
     for i = 1, N do C.Select[i].Boolean = false end
   end
 
-  local function runSelected(on)
+  function runSelected(on)
     local list = selectedIndices()
     if #list == 0 then
       Controls.LastAction.String = "Nothing selected"
@@ -843,9 +834,9 @@ if Controls then
   ------------------------------------------------------------------
   -- Press and hold All On / All Off
   ------------------------------------------------------------------
-  local hold = { timer = Timer.New(), which = nil, start = 0, fired = false }
+  hold = { timer = Timer.New(), which = nil, start = 0, fired = false }
 
-  local function stopHold()
+  function stopHold()
     hold.timer:Stop()
     hold.which = nil
     Controls.HoldProgress.Position = 0
@@ -862,7 +853,7 @@ if Controls then
     end
   end
 
-  local function holdHandler(which)
+  function holdHandler(which)
     return function(ctl)
       if ctl.Boolean then
         hold.which = which
@@ -882,7 +873,7 @@ if Controls then
   ------------------------------------------------------------------
   -- Setup handlers
   ------------------------------------------------------------------
-  local function findSwitchComponents()
+  function findSwitchComponents()
     local names = {}
     local ok, comps = pcall(Component.GetComponents)
     if not ok or type(comps) ~= "table" then return names end
@@ -895,7 +886,7 @@ if Controls then
     return names
   end
 
-  local function refreshChoices()
+  function refreshChoices()
     local names = findSwitchComponents()
     local choices = { "" }
     for _, n in ipairs(names) do table.insert(choices, n) end
@@ -903,22 +894,22 @@ if Controls then
     log(("Found %d Netgear switch components"):format(#names))
   end
 
-  local function refreshLegend(i)
+  function refreshLegend(i)
     C.Select[i].Legend = displayName(i)
   end
 
-  local poll = Timer.New()
+  poll = Timer.New()
   poll.EventHandler = function()
     update()
     if PORT_MODE then updateAllResolved() end -- core/trunk flags arrive after connect
   end
 
-  local function startPoll()
+  function startPoll()
     poll:Stop()
     poll:Start(math.max(Controls.PollInterval.Value, 1))
   end
 
-  local function rebindAll()
+  function rebindAll()
     bindAll()
     updateAllResolved()
     for i = 1, N do refreshLegend(i) end

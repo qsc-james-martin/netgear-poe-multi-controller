@@ -52,12 +52,12 @@ Each row mirrors the status of its Netgear plugin. The combined status is OK whe
 
 ## Metering
 
-Metering is off by default. Turn it on in the plugin properties to add PoE draw per switch and in total.
+Metering is an unchecked Boolean property by default. Check it in the plugin properties to add PoE draw per switch and in total. After updating an existing instance from the enum-based version, verify this setting.
 
 ## Other settings
 
 - **Deselect After On/Off.** Off by default, so your selection stays put after switching.
 - **Hold Time, Stagger and Poll Interval.** Adjustable on the Setup page.
-- **Debug Print.** A property that writes what the plugin is doing to the Q-SYS log.
+- **Diagnostics.** Discovery, binding and switching messages always print to the Q-SYS log; there is no Debug Print property.
 
 The plugin only controls Netgear plugins already in the design. It does not talk to the switches directly.
